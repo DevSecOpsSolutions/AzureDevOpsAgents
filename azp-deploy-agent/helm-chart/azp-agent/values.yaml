@@ -1,0 +1,43 @@
+replicas: 2
+
+
+image:
+  pullPolicy: Always
+  imagePullSecret: cargoo
+  repository: "commodity.azurecr.io/cargoo_v2_azuredeployagent"
+  
+  
+
+podName: azp-deploy-agent
+
+resources:
+  disk: "128Gi"
+  lcpu: "500m"
+  lmemory: "500Mi"
+  rcpu: "50m"
+  rmemory: "500Mi"
+       
+
+cleanRun: false
+
+extraEnv: {}
+
+azpPool:  "AKS-Agent-Deploy-Pool"
+
+
+azpUrl: "https://dev.azure.com/cargoodev"
+
+azpWorkspace: "/var/lib/docker"
+
+azpAgentName: azp-deploy-agent
+
+
+
+###### KEDA values
+
+keda:
+  pollingInterval: "5"
+  minReplicaCount: "2"
+  maxReplicaCount: "10"
+
+
