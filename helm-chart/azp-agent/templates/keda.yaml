@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: pipeline-auth
+  namespace: {{ .Release.Namespace }}
+  labels:
+    managed-by: "Helm"
+    name: pipeline-auth
+    namespace: {{ .Release.Namespace }}
+data:
+  personalAccessToken: {{ .Values.azpToken | b64enc }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: pipeline-trigger-auth
+  namespace: build-agents
+  labels:
+    managed-by: "Helm"
+    name: pipeline-trigger-auth
+    namespace: {{ .Release.Namespace }}
+spec:
+  secretTargetRef:
+    - parameter: personalAccessToken
+      name: pipeline-auth
+      key: personalAccessToken
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: azure-pipelines-scaledobject
+  namespace: {{ .Release.Namespace }}
+  labels:
+    managed-by: "Helm"
+    name: azure-pipelines-scaledobject
+    namespace: {{ .Release.Namespace }}
+spec:
+  scaleTargetRef:
+    name: azp-agent
+    kind: StatefulSet
+  pollingInterval:  {{ .Values.keda.pollingInterval }}
+  minReplicaCount: {{ .Values.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.keda.maxReplicaCount }} 
+  triggers:
+  - type: azure-pipelines
+    metadata:
+      poolID: "19"
+      organizationURLFromEnv: "AZP_URL"
+    authenticationRef:
+     name: pipeline-trigger-auth
