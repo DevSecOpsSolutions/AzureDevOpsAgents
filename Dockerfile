@@ -1,23 +1,37 @@
-FROM ubuntu:20.04
+# Base image: Ubuntu 24.04 LTS
+FROM ubuntu:24.04
 
-# To make it easier for build and release pipelines to run apt-get,
-# configure apt to not require confirmation (assume the -y argument by default)
+# Set target architecture for Azure DevOps agent
+ENV TARGETARCH="linux-x64"
+
+# Set non-interactive mode for apt-get
 ENV DEBIAN_FRONTEND=noninteractive
+
+# Configure apt to assume "yes" by default
 RUN echo "APT::Get::Assume-Yes \"true\";" > /etc/apt/apt.conf.d/90assumeyes
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    apt-utils \
+# Install essential system packages and build tools
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     curl \
-    jq \
-    unzip \
     git \
+    jq \
+    libicu74 \
+    unzip \
+    apt-utils \
     iputils-ping \
     libcurl4 \
     libunwind8 \
-    netcat \
-    libssl1.0 \
+    netcat-openbsd \
+    libssl3 \
+    liblttng-ust1 \
+    libkrb5-3 \
+    zlib1g \
+    libc-bin \
+    libseccomp2 \
+    nftables \
+    iptables \
 		sudo \
-		gnupg2 \ 
+		gnupg2 \
 		software-properties-common \
 		nano \
 		ca-certificates \
@@ -30,62 +44,66 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sshpass \
 	&& rm -rf /var/lib/apt/lists/*
 
-RUN curl -LsS https://aka.ms/InstallAzureCLIDeb | bash && rm -rf /var/lib/apt/lists/*
+# Install Azure CLI
+RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash && rm -rf /var/lib/apt/lists/*
 
+# Add Docker GPG key
+RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
 
-RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
-RUN add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+# Add Docker repository matching the image architecture and Ubuntu release
+RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-RUN apt-get update && apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io
+# Install Docker Engine for Docker-in-Docker support
+RUN apt-get update && apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update
+# Install Docker Compose v2.24.0
+RUN curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose && chmod +x /usr/local/bin/docker-compose
 
-RUN curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
-	
-RUN echo "deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ `lsb_release -cs` main" | tee /etc/apt/sources.list.d/azure-cli.list
+# Add Node.js 20.x LTS repository
+RUN curl -sL https://deb.nodesource.com/setup_20.x | bash -
 
-RUN apt-get update && apt-get install -y azure-cli
+# Install Node.js and Python pip
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs python3-pip && rm -rf /var/lib/apt/lists/*
 
-RUN curl -L "https://github.com/docker/compose/releases/download/v2.1.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-RUN chmod +x /usr/local/bin/docker-compose
+# Add Microsoft package repository for .NET (optional - for build tasks)
+RUN wget https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && \
+    dpkg -i packages-microsoft-prod.deb && \
+    rm packages-microsoft-prod.deb
 
-RUN curl -sL https://deb.nodesource.com/setup_12.x | sudo -E bash -
-RUN apt-get update 
-RUN apt install -y --no-install-recommends nodejs
-
-RUN wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
-RUN dpkg -i packages-microsoft-prod.deb
+# Install .NET 8.0 SDK for build tasks (agent will handle its own .NET runtime)
 RUN apt-get update && \
-    apt-get install -y apt-transport-https && \
-    apt-get update && \
-    apt-get install -y dotnet-sdk-5.0 && \
-	  apt-get install -y aspnetcore-runtime-5.0 && apt-get install python3-pip
+    apt-get install -y dotnet-sdk-8.0 && \
+    rm -rf /var/lib/apt/lists/*
 
-    
-RUN touch /var/spool/cron/crontabs/root
-RUN chmod 600 root
-RUN chown root:crontab root
-RUN crontab -l | { cat; echo '* * * * * /azp/service_health.sh >> /var/log/service_health.log 2>&1';} | crontab -
-RUN crontab -l | { cat; echo '* * * * * /azp/dockercleanup.sh';} | crontab -
+# Create crontab file for root
+RUN touch /var/spool/cron/crontabs/root && \
+    chmod 600 /var/spool/cron/crontabs/root && \
+    chown root:crontab /var/spool/cron/crontabs/root
 
-ARG TARGETARCH=amd64
-ARG AGENT_VERSION=2.195.0
+# Schedule service health monitoring and Docker cleanup (every minute)
+RUN (crontab -l 2>/dev/null || true; echo '* * * * * /azp/service_health.sh >> /var/log/service_health.log 2>&1') | crontab - && \
+    (crontab -l 2>/dev/null || true; echo '* * * * * /azp/dockercleanup.sh') | crontab -
 
+# Set working directory
 WORKDIR /azp
 
-RUN if [ "$TARGETARCH" = "amd64" ]; then \
-      AZP_AGENTPACKAGE_URL=https://vstsagentpackage.azureedge.net/agent/${AGENT_VERSION}/vsts-agent-linux-x64-${AGENT_VERSION}.tar.gz; \
-    else \
-      AZP_AGENTPACKAGE_URL=https://vstsagentpackage.azureedge.net/agent/${AGENT_VERSION}/vsts-agent-linux-${TARGETARCH}-${AGENT_VERSION}.tar.gz; \
-    fi; \
-    curl -LsS "$AZP_AGENTPACKAGE_URL" | tar -xz
+# Azure DevOps agent version
+ARG AGENT_VERSION=4.271.0
 
+# Download and extract Azure DevOps agent
+RUN curl -LsS "https://download.agent.dev.azure.com/agent/${AGENT_VERSION}/vsts-agent-linux-x64-${AGENT_VERSION}.tar.gz" | tar -xz
+
+# Copy agent startup script
 COPY ./start.sh .
+
+# Copy service health monitoring script
 COPY ./service_health.sh .
+
+# Copy Docker cleanup script
 COPY ./dockercleanup.sh .
 
-RUN chmod +x start.sh
-RUN chmod +x service_health.sh
-RUN chmod +x dockercleanup.sh
+# Make scripts executable
+RUN chmod +x start.sh service_health.sh dockercleanup.sh
 
+# Start the Azure DevOps agent
 CMD ["./start.sh"]
