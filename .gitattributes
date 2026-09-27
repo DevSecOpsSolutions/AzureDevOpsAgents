@@ -1,0 +1,4 @@
+# This repository is Linux-only. Every file is stored and checked out byte for
+# byte, with no end-of-line conversion in either direction. This overrides a
+# contributor's core.autocrlf, so LF files cannot be turned into CRLF.
+* -text

@@ -70,8 +70,36 @@ trap 'cleanup; exit 143' TERM
 
 print_header "3. Starting docker and cron services"
 
-service docker start
-service cron start
+start_docker() {
+  if docker info >/dev/null 2>&1; then
+    echo "docker daemon already running"
+    return 0
+  fi
+
+  # Raise limits ourselves where the kernel allows it. /etc/init.d/docker sets
+  # these unconditionally and aborts when the container rejects them, which under
+  # `set -e` would tear down the agent, so start dockerd directly instead.
+  ulimit -n 1048576 2>/dev/null || echo 1>&2 "warning: could not raise nofile limit"
+  ulimit -u unlimited 2>/dev/null || echo 1>&2 "warning: could not raise nproc limit"
+
+  dockerd >>/var/log/dockerd.log 2>&1 &
+
+  local i
+  for i in $(seq 1 60); do
+    if docker info >/dev/null 2>&1; then
+      echo "docker daemon ready after ${i}s"
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo 1>&2 "warning: docker daemon not ready after 60s; see /var/log/dockerd.log"
+  return 1
+}
+
+# A failure here must not kill the agent: jobs that do not need Docker can still run.
+start_docker || true
+service cron start || echo 1>&2 "warning: failed to start cron"
 
 # To be aware of TERM and INT signals call run.sh
 # Running it with the --once flag at the end will shut down the agent after the build is executed

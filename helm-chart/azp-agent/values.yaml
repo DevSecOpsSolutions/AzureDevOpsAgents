@@ -1,10 +1,12 @@
-replicas: 2
+# NOTE: there is no `replicas` here on purpose. KEDA owns the StatefulSet's
+# replica count via the scale subresource; the chart must not declare it or
+# Helm's server-side apply conflicts with KEDA. Use keda.minReplicaCount /
+# keda.maxReplicaCount below.
 
 
 image:
   pullPolicy: Always
-  imagePullSecret: cargoo
-  repository: "commodity.azurecr.io/cargoo_v2_azuredcokeragent"  
+  repository: ""  
   
 
 podName: azp-agent
@@ -24,7 +26,9 @@ extraEnv: {}
 
 azpPool:  "AKS-Agent-Pool"
 
-azpUrl: "https://dev.azure.com/cargoodev"
+# Pool IDs and pool-name lookups are resolved against THIS organization.
+# Override per environment with --set azpUrl=...
+azpUrl: ""
 
 azpWorkspace: "/var/lib/docker"
 
@@ -32,6 +36,28 @@ azpWorkspace: "/var/lib/docker"
 ###### KEDA values
 
 keda:
+  # How often KEDA polls the Azure Pipelines queue.
   pollingInterval: "5"
-  minReplicaCount: "4"
+
+  # 0 = scale to zero when the queue is empty (cold start).
+  # Use 4 for a warm pool that absorbs the cold-start latency instead.
+  minReplicaCount: "2"
+
   maxReplicaCount: "10"
+
+  # Idle seconds before scaling back toward minReplicaCount. KEDA's default is
+  # 300; 60 keeps the test loop short. Raise it for production so agents are not
+  # torn down between closely spaced pipeline runs.
+  cooldownPeriod: "60"
+
+  # Leave empty (recommended): KEDA resolves the pool by name from azpPool
+  # above, against the organization in azpUrl, so the ID is always correct.
+  #
+  # Pool IDs are allocated per Azure DevOps ORGANIZATION and are not portable --
+  # the same pool is a different number in a different org. Only set this as a
+  # fallback, when name lookup cannot work:
+  #   * two pools share the same name in the organization, or
+  #   * the PAT lacks organization-level "Agent Pools (Read)" -- a project-scoped
+  #     PAT registers agents fine but cannot enumerate pools.
+  # Find the ID with: az pipelines pool list --organization <url> -o table
+  poolID: ""

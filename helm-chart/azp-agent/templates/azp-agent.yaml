@@ -7,7 +7,10 @@ metadata:
     chart: {{ .Chart.Name }}
     version: {{ .Chart.Version }}
 spec:
-  replicas: {{ .Values.replicas }}
+  # spec.replicas is deliberately NOT set here. KEDA owns it through the scale
+  # subresource, and Helm's server-side apply conflicts with that owner if the
+  # chart also declares it. Size the deployment with keda.minReplicaCount /
+  # keda.maxReplicaCount instead.
   serviceName: {{ .Chart.Name }}
   selector:
     matchLabels:

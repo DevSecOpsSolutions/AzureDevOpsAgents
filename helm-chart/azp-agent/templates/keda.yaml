@@ -15,7 +15,7 @@ apiVersion: keda.sh/v1alpha1
 kind: TriggerAuthentication
 metadata:
   name: pipeline-trigger-auth
-  namespace: build-agents
+  namespace: {{ .Release.Namespace }}
   labels:
     managed-by: "Helm"
     name: pipeline-trigger-auth
@@ -37,15 +37,31 @@ metadata:
     namespace: {{ .Release.Namespace }}
 spec:
   scaleTargetRef:
-    name: azp-agent
+    # Must match the StatefulSet name in azp-agent.yaml.
+    name: {{ .Values.azpAgentName | default "azp-agent" }}
     kind: StatefulSet
   pollingInterval:  {{ .Values.keda.pollingInterval }}
+  {{- if .Values.keda.cooldownPeriod }}
+  # Idle time before scaling back down (KEDA default 300s). The HPA adds its own
+  # ~300s stabilization window on top, so the observed scale-down is slower.
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
+  {{- end }}
   minReplicaCount: {{ .Values.keda.minReplicaCount }}
   maxReplicaCount: {{ .Values.keda.maxReplicaCount }} 
   triggers:
   - type: azure-pipelines
     metadata:
-      poolID: "19"
+      {{- if .Values.keda.poolID }}
+      # Fallback: an explicit pool ID. Pool IDs are allocated per Azure DevOps
+      # organization and are not portable, so only set this when name lookup
+      # cannot work -- see keda.poolID in values.yaml.
+      poolID: {{ .Values.keda.poolID | quote }}
+      {{- else }}
+      # KEDA resolves this to an ID at runtime against the organization in
+      # AZP_URL. It is the same value the agent registers with, so the scaler
+      # and the agent cannot drift apart.
+      poolName: {{ required "azpPool must be set, or set keda.poolID explicitly" .Values.azpPool | quote }}
+      {{- end }}
       organizationURLFromEnv: "AZP_URL"
     authenticationRef:
      name: pipeline-trigger-auth
